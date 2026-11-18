@@ -28,16 +28,17 @@
       view.pos = new Float32Array(buf, 0, N * 3);
       view.N = N;
       $('mPts').textContent = N.toLocaleString();
+      var tag = $('ptTag'); if (tag) tag.textContent = (N / 1000).toFixed(0) + 'k 点';
       buildThree();
       run();
     });
   }
 
   // ============ 3D 预览 ============
-  var renderer, scene, camera, cloud, geo, cam = { tx: 6, ty: 1.2, tz: 4.5, r: 22, th: 0.9, ph: 1.05 };
+  var renderer, scene, camera, cloud, geo, sliceBox, cam = { tx: 6, ty: 1.0, tz: 4.5, r: 20, th: 0.80, ph: 0.92 };
 
   function buildThree() {
-    renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: false });
+    renderer = new THREE.WebGLRenderer({ canvas: $('gl'), antialias: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.setClearColor(0x0b0f14, 1);
 
@@ -52,10 +53,26 @@
     geo.computeBoundingSphere();
 
     cloud = new THREE.Points(geo, new THREE.PointsMaterial({
-      size: 0.05, vertexColors: true, sizeAttenuation: true
+      size: 0.058, vertexColors: true, sizeAttenuation: true
     }));
     cloud.frustumCulled = false;
     scene.add(cloud);
+
+    // 地面网格，提供空间参照
+    var grid = new THREE.GridHelper(24, 24, 0x2a3b4f, 0x16212d);
+    grid.position.set(6, -0.02, 4.5);
+    scene.add(grid);
+
+    // 切片范围线框
+    sliceBox = new THREE.Group();
+    var bg = new THREE.BoxGeometry(1, 1, 1);
+    var edges = new THREE.LineSegments(new THREE.EdgesGeometry(bg),
+      new THREE.LineBasicMaterial({ color: 0xffa53d, transparent: true, opacity: 0.55 }));
+    var face = new THREE.Mesh(bg, new THREE.MeshBasicMaterial({
+      color: 0xffa53d, transparent: true, opacity: 0.035, side: THREE.DoubleSide, depthWrite: false
+    }));
+    sliceBox.add(face); sliceBox.add(edges);
+    scene.add(sliceBox);
 
     applyCam(); resize();
   }
@@ -98,13 +115,34 @@
   // 切片内的点高亮，其余压暗
   function paintSlice(y0, y1) {
     var col = geo.getAttribute('color').array, p = view.pos, N = view.N;
+    var H = (view.meta && view.meta.height) || 2.7;
     for (var i = 0; i < N; i++) {
       var y = p[i * 3 + 1];
-      var inS = y >= y0 && y <= y1;
-      if (inS) { col[i * 3] = 0.72; col[i * 3 + 1] = 0.86; col[i * 3 + 2] = 1.0; }
-      else { col[i * 3] = 0.10; col[i * 3 + 1] = 0.13; col[i * 3 + 2] = 0.18; }
+      if (y >= y0 && y <= y1) {
+        col[i * 3] = 1.0; col[i * 3 + 1] = 0.64; col[i * 3 + 2] = 0.26;
+      } else {
+        var t = Math.pow(Math.max(0, Math.min(1, y / H)), 0.6);
+        col[i * 3] = 0.18 + t * 0.28;
+        col[i * 3 + 1] = 0.26 + t * 0.32;
+        col[i * 3 + 2] = 0.38 + t * 0.34;
+      }
     }
     geo.getAttribute('color').needsUpdate = true;
+
+    // 同步切片线框
+    if (sliceBox) {
+      var W = view.meta.width, D = view.meta.depth, hgt = Math.max(0.06, y1 - y0);
+      sliceBox.scale.set(W, hgt, D);
+      sliceBox.position.set(W / 2, (y0 + y1) / 2, D / 2);
+    }
+    // 切片内点数过少时提示
+    var cnt = 0;
+    for (var k = 0; k < N; k++) { var yy = p[k * 3 + 1]; if (yy >= y0 && yy <= y1) cnt++; }
+    var tip = $('sliceTip');
+    if (tip) {
+      if (cnt < 6000) { tip.textContent = '当前切片只有 ' + cnt.toLocaleString() + ' 个点，墙面结构不明显，建议把切片拉回 0.3–1.6 m'; tip.style.display = 'block'; }
+      else tip.style.display = 'none';
+    }
   }
 
   // ============ 核心算法 ============
@@ -402,14 +440,35 @@
       }
     }
 
-    // 墙线
-    ctx.strokeStyle = '#2563eb';
-    ctx.lineWidth = Math.max(2.5, 0.16 * sc);
-    ctx.lineCap = 'round';
+    // 墙体：按真实墙厚画双线 + 填充
+    var hw = 0.09;
+    ctx.fillStyle = '#cfe0ff';
     result.walls.forEach(function (s) {
+      var dx = s.x2 - s.x1, dz = s.z2 - s.z1, L = Math.hypot(dx, dz) || 1;
+      var nx = -dz / L * hw, nz = dx / L * hw;
       ctx.beginPath();
-      ctx.moveTo(TX(s.x1), TZ(s.z1));
-      ctx.lineTo(TX(s.x2), TZ(s.z2));
+      ctx.moveTo(TX(s.x1 + nx), TZ(s.z1 + nz));
+      ctx.lineTo(TX(s.x2 + nx), TZ(s.z2 + nz));
+      ctx.lineTo(TX(s.x2 - nx), TZ(s.z2 - nz));
+      ctx.lineTo(TX(s.x1 - nx), TZ(s.z1 - nz));
+      ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(TX(s.x1), TZ(s.z1), hw * sc, 0, 6.2832);
+      ctx.arc(TX(s.x2), TZ(s.z2), hw * sc, 0, 6.2832);
+      ctx.fill();
+    });
+    ctx.strokeStyle = '#2563eb';
+    ctx.lineWidth = 1.4;
+    ctx.lineJoin = 'round';
+    result.walls.forEach(function (s) {
+      var dx = s.x2 - s.x1, dz = s.z2 - s.z1, L = Math.hypot(dx, dz) || 1;
+      var nx = -dz / L * hw, nz = dx / L * hw;
+      ctx.beginPath();
+      ctx.moveTo(TX(s.x1 + nx), TZ(s.z1 + nz));
+      ctx.lineTo(TX(s.x2 + nx), TZ(s.z2 + nz));
+      ctx.moveTo(TX(s.x1 - nx), TZ(s.z1 - nz));
+      ctx.lineTo(TX(s.x2 - nx), TZ(s.z2 - nz));
       ctx.stroke();
     });
 
@@ -541,6 +600,13 @@
     requestAnimationFrame(loop);
     if (renderer && scene) renderer.render(scene, camera);
   }
+
+  (function readParams() {
+    var q = new URLSearchParams(location.search);
+    if (q.has('y0')) { $('y0').value = q.get('y0'); $('y0v').textContent = (+$('y0').value).toFixed(2); }
+    if (q.has('y1')) { $('y1').value = q.get('y1'); $('y1v').textContent = (+$('y1').value).toFixed(2); }
+    if (q.has('res')) { $('res').value = q.get('res'); }
+  })();
 
   load().then(function () { requestAnimationFrame(loop); });
   window.__s2p = { get result() { return result; }, run: run };

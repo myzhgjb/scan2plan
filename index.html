@@ -61,6 +61,8 @@ main{flex:1;display:flex;min-height:0}
 .busy{position:absolute;inset:0;display:none;align-items:center;justify-content:center;background:rgba(255,255,255,.6);z-index:9;font-size:12px;color:var(--tx2)}
 .busy.on{display:flex}
 
+  .slicetip{display:none;position:absolute;left:12px;right:12px;bottom:38px;background:rgba(255,165,61,.12);
+    border:1px solid rgba(255,165,61,.45);color:#ffc98a;font-size:11px;padding:7px 10px;border-radius:6px;line-height:1.5}
 @media(max-width:900px){
   main{flex-direction:column}
   .pane.left{flex:0 0 38%;border-right:none;border-bottom:1px solid var(--line)}
@@ -91,10 +93,11 @@ main{flex:1;display:flex;min-height:0}
 
   <main>
     <section class="pane left">
-      <div class="ptitle"><b>原始点云</b><span class="tag">133k 点</span><span style="margin-left:auto">左键旋转 · 滚轮缩放</span></div>
+      <div class="ptitle"><b>原始点云</b><span class="tag" id="ptTag">—</span><span style="margin-left:auto">左键旋转 · 滚轮缩放</span></div>
       <div class="stage">
         <canvas id="gl"></canvas>
-        <div class="hud"><b>高亮部分</b>为参与计算的切片（0.3–1.6 m）<br>暗色为地面、天花与切片外点云</div>
+        <div class="hud"><b>橙色</b>为参与计算的切片范围　·　<b>蓝灰</b>为其余点云（按高度渐变）</div>
+        <div class="slicetip" id="sliceTip"></div>
       </div>
     </section>
 
